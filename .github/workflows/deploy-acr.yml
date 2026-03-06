@@ -1,0 +1,56 @@
+name: Build and Push (src) to Azure Container Registry
+
+on:
+  push:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Create src/.env from the GitHub Secret at build time only (do NOT commit this file)
+      - name: Create .env (from secret ENV)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Write secret exactly as-is; ensure it ends with a newline
+          printf '%s\n' "${{ secrets.ENV }}" > src/.env
+
+      - name: Log in to Azure Container Registry
+        uses: azure/docker-login@v2
+        with:
+          login-server: ${{ secrets.ACR_LOGIN_SERVER }}   # e.g. myregistry.azurecr.io
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Build and push image (context = src/)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          IMAGE="${{ secrets.ACR_LOGIN_SERVER }}/${{ secrets.ACR_REPOSITORY }}"
+          TAG_SHA="${{ github.sha }}"
+          TAG_LATEST="latest"
+
+          # Build using ONLY src/ as the build context and src/Dockerfile as the Dockerfile
+          docker build \
+            --file src/Dockerfile \
+            --tag "${IMAGE}:${TAG_SHA}" \
+            --tag "${IMAGE}:${TAG_LATEST}" \
+            src
+
+          docker push "${IMAGE}:${TAG_SHA}"
+          docker push "${IMAGE}:${TAG_LATEST}"
+
+      - name: Cleanup temporary .env
+        if: always()
+        shell: bash
+        run: |
+          rm -f src/.env
